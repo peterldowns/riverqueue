@@ -522,8 +522,10 @@ func TestJobExecutor_Execute(t *testing.T) {
 		require.WithinDuration(t, executor.ClientRetryPolicy.NextRetry(bundle.jobRow), job.ScheduledAt, 1*time.Second)
 		require.Equal(t, rivertype.JobStateRetryable, job.State)
 		require.Len(t, job.Errors, 1)
-		// Sufficient enough to ensure that the stack trace is included:
-		require.Contains(t, job.Errors[0].Trace, "river/job_executor.go")
+		// Sufficient enough to ensure that the stack trace is included.  Only
+		// checks for this file name, not the parent directory, since developers
+		// may clone the repo under a different name than "river".
+		require.Contains(t, job.Errors[0].Trace, "/job_executor.go")
 	})
 
 	t.Run("PanicAgainAfterRetry", func(t *testing.T) {
