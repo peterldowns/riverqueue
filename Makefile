@@ -18,7 +18,7 @@ lint:
 
 .PHONY: test
 test:
-	cd . && go test ./... -p 1 -count=1 -race
+	cd . && go test ./... -count=1 -race
 	cd cmd/river && go test ./... -count=1 -race
 	cd riverdriver && go test ./... -count=1 -race
 	cd riverdriver/riverdatabasesql && go test ./... -count=1 -race

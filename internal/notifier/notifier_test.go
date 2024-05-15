@@ -62,13 +62,16 @@ func TestNotifier(t *testing.T) {
 		t.Helper()
 
 		require.NoError(t, notifier.Start(ctx))
-		t.Cleanup(notifier.Stop)
+		t.Cleanup(func() {
+			notifier.Stop()
+		})
 	}
 
 	t.Run("StartsAndStops", func(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 		start(t, notifier)
 
 		notifier.testSignals.ListeningBegin.WaitOrTimeout()
@@ -86,6 +89,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 		notifier.Logger = riverinternaltest.LoggerWarn(t) // loop started/stop log is very noisy; suppress
 		notifier.testSignals = notifierTestSignals{}      // deinit so channels don't fill
 
@@ -145,6 +149,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 		start(t, notifier)
 
 		notifyChan := make(chan TopicAndPayload, 10)
@@ -171,6 +176,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 
 		notifyChan := make(chan TopicAndPayload, 10)
 
@@ -257,6 +263,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 
 		notifyChan := make(chan TopicAndPayload, 10)
 
@@ -275,6 +282,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 		start(t, notifier)
 
 		notifyChan1 := make(chan TopicAndPayload, 10)
@@ -341,6 +349,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 		start(t, notifier)
 
 		notifyChan1 := make(chan TopicAndPayload, 10)
@@ -398,6 +407,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 		start(t, notifier)
 
 		const (
@@ -472,7 +482,8 @@ func TestNotifier(t *testing.T) {
 	t.Run("WaitErrorAndBackoff", func(t *testing.T) {
 		t.Parallel()
 
-		notifier, _ := setup(t)
+		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 
 		notifier.disableSleep = true
 
@@ -500,7 +511,8 @@ func TestNotifier(t *testing.T) {
 	t.Run("BackoffSleepCancelledOnStop", func(t *testing.T) {
 		t.Parallel()
 
-		notifier, _ := setup(t)
+		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 
 		listenerMock := NewListenerMock(notifier.listener)
 		listenerMock.waitForNotificationFunc = func(ctx context.Context) (*riverdriver.Notification, error) {
@@ -519,6 +531,7 @@ func TestNotifier(t *testing.T) {
 		t.Parallel()
 
 		notifier, bundle := setup(t)
+		defer bundle.dbPool.Close()
 
 		// Disable the backoff sleep that would occur after the first retry.
 		notifier.disableSleep = true

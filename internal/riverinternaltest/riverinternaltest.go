@@ -4,9 +4,9 @@ package riverinternaltest
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/url"
 	"os"
@@ -17,15 +17,19 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/peterldowns/pgtestdb"
+	"github.com/peterldowns/pgtestdb/migrators/common"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
 	"github.com/riverqueue/river/internal/baseservice"
 	"github.com/riverqueue/river/internal/rivercommon"
 	"github.com/riverqueue/river/internal/riverinternaltest/slogtest" //nolint:depguard
-	"github.com/riverqueue/river/internal/testdb"
 	"github.com/riverqueue/river/internal/util/randutil"
 	"github.com/riverqueue/river/internal/util/valutil"
+	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
+	"github.com/riverqueue/river/rivermigrate"
 )
 
 // SchedulerShortInterval is an artificially short interval for the scheduler
@@ -39,8 +43,6 @@ import (
 const SchedulerShortInterval = 500 * time.Millisecond
 
 var (
-	dbManager *testdb.Manager //nolint:gochecknoglobals
-
 	// Maximum number of connections for the connection pool. This is the same
 	// default that pgxpool uses (the larger of 4 or number of CPUs), but made a
 	// variable here so that we can reference it from the test suite and not
@@ -200,25 +202,36 @@ func LoggerWarn(tb testing.TB) *slog.Logger {
 	return slogtest.NewLogger(tb, &slog.HandlerOptions{Level: slog.LevelWarn})
 }
 
-// TestDB acquires a dedicated test database for the duration of the test. If an
-// error occurs, the test fails. The test database will be automatically
-// returned to the pool at the end of the test and the pgxpool will be closed.
+// NewDB is a helper that returns an open connection to a unique and isolated
+// test database, fully migrated and ready for you to query.
 func TestDB(ctx context.Context, tb testing.TB) *pgxpool.Pool {
 	tb.Helper()
-
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	testPool, err := dbManager.Acquire(ctx)
-	if err != nil {
-		tb.Fatalf("Failed to acquire pool for test DB: %v", err)
+	serverConf := pgtestdb.Config{
+		DriverName: "pgx",
+		User:       "postgres",
+		Password:   "postgres",
+		Host:       "localhost",
+		Port:       "5432",
+		Options:    "sslmode=disable",
 	}
-	tb.Cleanup(testPool.Release)
-
-	// Also close the pool just to ensure nothing is still active on it:
-	tb.Cleanup(testPool.Pool().Close)
-
-	return testPool.Pool()
+	// You'll want to use a real migrator, this is just an example. See the rest
+	// of the docs for more information.
+	var migrator pgtestdb.Migrator = &pgtestdbMigrator{} // TODO: later
+	dbConf := pgtestdb.Custom(tb, serverConf, migrator)
+	pgxConfig, err := pgxpool.ParseConfig(dbConf.URL())
+	pgxConfig.MaxConns = dbPoolMaxConns
+	if err != nil {
+		panic(fmt.Sprintf("error parsing database URL: %v", err))
+	}
+	// Use a short conn timeout here to attempt to quickly cancel attempts that
+	// are unlikely to succeed even with more time:
+	pgxConfig.ConnConfig.ConnectTimeout = 2 * time.Second
+	pgxConfig.ConnConfig.RuntimeParams["timezone"] = "UTC"
+	pool, err := pgxpool.NewWithConfig(ctx, pgxConfig)
+	if err != nil {
+		panic(fmt.Sprintf("error creating database pool: %v", err))
+	}
+	return pool
 }
 
 // StubTime returns a pair of function for (getTime, setTime), the former of
@@ -246,49 +259,14 @@ func StubTime(initialTime time.Time) (func() time.Time, func(t time.Time)) {
 	return getTime, setTime
 }
 
-// A pool and mutex to protect it, lazily initialized by TestTx. Once open, this
-// pool is never explicitly closed, instead closing implicitly as the package
-// tests finish.
-var (
-	dbPool   *pgxpool.Pool //nolint:gochecknoglobals
-	dbPoolMu sync.RWMutex  //nolint:gochecknoglobals
-)
-
 // TestTx starts a test transaction that's rolled back automatically as the test
 // case is cleaning itself up. This can be used as a lighter weight alternative
 // to `testdb.Manager` in components where it's not necessary to have many
 // connections open simultaneously.
 func TestTx(ctx context.Context, tb testing.TB) pgx.Tx {
 	tb.Helper()
-
-	tryPool := func() *pgxpool.Pool {
-		dbPoolMu.RLock()
-		defer dbPoolMu.RUnlock()
-		return dbPool
-	}
-
-	getPool := func() *pgxpool.Pool {
-		if dbPool := tryPool(); dbPool != nil {
-			return dbPool
-		}
-
-		dbPoolMu.Lock()
-		defer dbPoolMu.Unlock()
-
-		// Multiple goroutines may have passed the initial `nil` check on start
-		// up, so check once more to make sure pool hasn't been set yet.
-		if dbPool != nil {
-			return dbPool
-		}
-
-		var err error
-		dbPool, err = pgxpool.NewWithConfig(ctx, DatabaseConfig("river_testdb"))
-		require.NoError(tb, err)
-
-		return dbPool
-	}
-
-	tx, err := getPool().Begin(ctx)
+	pool := TestDB(ctx, tb)
+	tx, err := pool.Begin(ctx)
 	require.NoError(tb, err)
 
 	tb.Cleanup(func() {
@@ -324,24 +302,51 @@ func TestTx(ctx context.Context, tb testing.TB) pgx.Tx {
 
 		require.NoError(tb, err)
 	})
-
 	return tx
+}
+
+type pgtestdbMigrator struct{}
+
+func (pm *pgtestdbMigrator) Hash() (string, error) {
+	hash := common.NewRecursiveHash()
+	for _, migration := range rivermigrate.Migrations() {
+		hash.AddField("version", migration.Version)
+		hash.Add([]byte(migration.SQLUp))
+		hash.Add([]byte(migration.SQLDown))
+	}
+	return hash.String(), nil
+}
+
+func (pm *pgtestdbMigrator) Migrate(
+	ctx context.Context,
+	db *sql.DB,
+	_ pgtestdb.Config,
+) error {
+	migrator := rivermigrate.New(riverdatabasesql.New(db), nil)
+	_, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
+	return err
+}
+
+func (pm *pgtestdbMigrator) Prepare(
+	_ context.Context,
+	_ *sql.DB,
+	_ pgtestdb.Config,
+) error {
+	return nil
+}
+
+func (pm *pgtestdbMigrator) Verify(
+	_ context.Context,
+	_ *sql.DB,
+	_ pgtestdb.Config,
+) error {
+	return nil
 }
 
 // TruncateRiverTables truncates River tables in the target database. This is
 // for test cleanup and should obviously only be used in tests.
-func TruncateRiverTables(ctx context.Context, pool *pgxpool.Pool) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	tables := []string{"river_job", "river_leader", "river_queue"}
-
-	for _, table := range tables {
-		if _, err := pool.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s;", table)); err != nil {
-			return fmt.Errorf("error truncating %q: %w", table, err)
-		}
-	}
-
+func TruncateRiverTables(_ context.Context, _ *pgxpool.Pool) error {
+	// TODO: remove entirely, now a no-op
 	return nil
 }
 
@@ -414,22 +419,12 @@ var ignoredKnownGoroutineLeaks = []goleak.Option{ //nolint:gochecknoglobals
 // amongst all packages. e.g. Configures a manager for test databases on setup,
 // and checks for no goroutine leaks on teardown.
 func WrapTestMain(m *testing.M) {
-	var err error
-	dbManager, err = testdb.NewManager(DatabaseConfig("river_testdb"), dbPoolMaxConns, nil, TruncateRiverTables)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	status := m.Run()
-
-	dbManager.Close()
-
 	if status == 0 {
 		if err := goleak.Find(ignoredKnownGoroutineLeaks...); err != nil {
 			fmt.Fprintf(os.Stderr, "goleak: Errors on successful test run: %v\n", err)
 			status = 1
 		}
 	}
-
 	os.Exit(status)
 }

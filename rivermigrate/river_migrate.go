@@ -562,6 +562,10 @@ func mustMigrationsFromFS(migrationFS fs.FS) []*Migration {
 	return bundles
 }
 
+func Migrations() []*Migration {
+	return mustMigrationsFromFS(migrationFS)
+}
+
 // Validates and fully initializes a set of migrations to reduce the probability
 // of configuration problems as new migrations are introduced. e.g. Checks for
 // missing fields or accidentally duplicated version numbers from copy/pasta

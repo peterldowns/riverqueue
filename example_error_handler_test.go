@@ -5,8 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-
-	"github.com/jackc/pgx/v5/pgxpool"
+	"testing"
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/internal/riverinternaltest"
@@ -61,10 +60,10 @@ func (w *ErroringWorker) Work(ctx context.Context, job *river.Job[ErroringArgs])
 func Example_errorHandler() {
 	ctx := context.Background()
 
-	dbPool, err := pgxpool.NewWithConfig(ctx, riverinternaltest.DatabaseConfig("river_testdb_example"))
-	if err != nil {
-		panic(err)
-	}
+	// Required for purposes of our example here, but in reality t will be the
+	// *testing.T that comes from a test's argument.
+	t := &testing.T{}
+	dbPool := riverinternaltest.TestDB(ctx, t)
 	defer dbPool.Close()
 
 	// Required for the purpose of this test, but not necessary in real usage.

@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/internal/riverinternaltest"
 	"github.com/riverqueue/river/internal/util/slogutil"
@@ -32,10 +30,10 @@ func (w *RequiredWorker) Work(ctx context.Context, job *river.Job[RequiredArgs])
 func Example_requireInserted() {
 	ctx := context.Background()
 
-	dbPool, err := pgxpool.NewWithConfig(ctx, riverinternaltest.DatabaseConfig("river_testdb_example"))
-	if err != nil {
-		panic(err)
-	}
+	// Required for purposes of our example here, but in reality t will be the
+	// *testing.T that comes from a test's argument.
+	t := &testing.T{}
+	dbPool := riverinternaltest.TestDB(ctx, t)
 	defer dbPool.Close()
 
 	// Required for the purpose of this test, but not necessary in real usage.
@@ -66,10 +64,6 @@ func Example_requireInserted() {
 	if err != nil {
 		panic(err)
 	}
-
-	// Required for purposes of our example here, but in reality t will be the
-	// *testing.T that comes from a test's argument.
-	t := &testing.T{}
 
 	job := rivertest.RequireInsertedTx[*riverpgxv5.Driver](ctx, t, tx, &RequiredArgs{}, nil)
 	fmt.Printf("Test passed with message: %s\n", job.Args.Message)

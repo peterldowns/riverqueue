@@ -5,17 +5,20 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/peterldowns/pgtestdb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/riverqueue/river/internal/riverinternaltest"
+	"github.com/riverqueue/river/internal/riverinternaltest/slogtest"
 	"github.com/riverqueue/river/internal/util/dbutil"
 	"github.com/riverqueue/river/internal/util/sliceutil"
 	"github.com/riverqueue/river/riverdriver"
@@ -47,6 +50,50 @@ var (
 	riverMigrationsWithTestVersionsMaxVersion = riverMigrationsMaxVersion + len(testVersions)
 )
 
+// Logger returns a logger suitable for use in tests.
+//
+// Defaults to informational verbosity. If env is set with `RIVER_DEBUG=true`,
+// debug level verbosity is activated.
+func TodoFixMeLogger(tb testing.TB) *slog.Logger {
+	tb.Helper()
+
+	if os.Getenv("RIVER_DEBUG") == "1" || os.Getenv("RIVER_DEBUG") == "true" {
+		return slogtest.NewLogger(tb, &slog.HandlerOptions{Level: slog.LevelDebug})
+	}
+
+	return slogtest.NewLogger(tb, nil)
+}
+
+// NewDB is a helper that returns an open connection to a unique and isolated
+// test database, not migrated just brand spanking new and empty.
+func TodoFixmeTestDB(ctx context.Context, tb testing.TB) *pgxpool.Pool {
+	tb.Helper()
+	serverConf := pgtestdb.Config{
+		DriverName: "pgx",
+		User:       "postgres",
+		Password:   "postgres",
+		Host:       "localhost",
+		Port:       "5432",
+		Options:    "sslmode=disable",
+	}
+	// You'll want to use a real migrator, this is just an example. See the rest
+	// of the docs for more information.
+	var migrator pgtestdb.Migrator = pgtestdb.NoopMigrator{} // TODO: later
+	dbConf := pgtestdb.Custom(tb, serverConf, migrator)
+	pgxConfig, err := pgxpool.ParseConfig(dbConf.URL())
+	if err != nil {
+		panic(fmt.Sprintf("error parsing database URL: %v", err))
+	}
+	// Use a short conn timeout here to attempt to quickly cancel attempts that
+	// are unlikely to succeed even with more time:
+	pgxConfig.ConnConfig.ConnectTimeout = 2 * time.Second
+	pgxConfig.ConnConfig.RuntimeParams["timezone"] = "UTC"
+	pool, err := pgxpool.NewWithConfig(ctx, pgxConfig)
+	if err != nil {
+		panic(fmt.Sprintf("error creating database pool: %v", err))
+	}
+	return pool
+}
 func TestMigrator(t *testing.T) {
 	t.Parallel()
 
@@ -68,7 +115,7 @@ func TestMigrator(t *testing.T) {
 		// we use test DBs instead of test transactions, but this could be
 		// changed to test transactions as long as test cases were made to run
 		// non-parallel.
-		dbPool := riverinternaltest.TestDB(ctx, t)
+		dbPool := TodoFixmeTestDB(ctx, t)
 
 		// Despite being in an isolated database, we still start a transaction
 		// because we don't want schema changes we make to persist.
@@ -79,7 +126,7 @@ func TestMigrator(t *testing.T) {
 		bundle := &testBundle{
 			dbPool: dbPool,
 			driver: riverpgxv5.New(dbPool),
-			logger: riverinternaltest.Logger(t),
+			logger: TodoFixMeLogger(t),
 			tx:     tx,
 		}
 

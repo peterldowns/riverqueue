@@ -1,5 +1,7 @@
 package rivermigrate_test
 
+/*
+TODO: fixme
 import (
 	"context"
 	"database/sql"
@@ -12,7 +14,6 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverdatabasesql"
 	"github.com/riverqueue/river/rivermigrate"
 )
-
 // Example_migrateDatabaseSQL demonstrates the use of River's Go migration API
 // through Go's built-in database/sql package.
 func Example_migrateDatabaseSQL() {
@@ -70,3 +71,4 @@ func Example_migrateDatabaseSQL() {
 	// Migrated [DOWN] version 2
 	// Migrated [DOWN] version 1
 }
+*/

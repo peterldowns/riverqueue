@@ -127,7 +127,8 @@ func TestJobExecutor_Execute(t *testing.T) {
 		t.Helper()
 
 		var (
-			tx        = riverinternaltest.TestTx(ctx, t)
+			pool      = riverinternaltest.TestDB(ctx, t)
+			tx, _     = pool.Begin(ctx)
 			archetype = riverinternaltest.BaseServiceArchetype(t)
 			exec      = riverpgxv5.New(nil).UnwrapExecutor(tx)
 			completer = jobcompleter.NewInlineCompleter(archetype, exec)

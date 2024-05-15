@@ -49,7 +49,6 @@ func TestDriverRiverPgxV5_Executor(t *testing.T) {
 	driver := riverpgxv5.New(nil)
 	riverdrivertest.ExerciseExecutorFull(ctx, t, driver, func(ctx context.Context, t *testing.T) pgx.Tx {
 		t.Helper()
-
 		return riverinternaltest.TestTx(ctx, t)
 	})
 }

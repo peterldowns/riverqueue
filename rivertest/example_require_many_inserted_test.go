@@ -6,8 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/internal/riverinternaltest"
 	"github.com/riverqueue/river/internal/util/slogutil"
@@ -49,16 +48,11 @@ func (w *SecondRequiredWorker) Work(ctx context.Context, job *river.Job[SecondRe
 func Example_requireManyInserted() {
 	ctx := context.Background()
 
-	dbPool, err := pgxpool.NewWithConfig(ctx, riverinternaltest.DatabaseConfig("river_testdb_example"))
-	if err != nil {
-		panic(err)
-	}
+	// Required for purposes of our example here, but in reality t will be the
+	// *testing.T that comes from a test's argument.
+	t := &testing.T{}
+	dbPool := riverinternaltest.TestDB(ctx, t)
 	defer dbPool.Close()
-
-	// Required for the purpose of this test, but not necessary in real usage.
-	if err := riverinternaltest.TruncateRiverTables(ctx, dbPool); err != nil {
-		panic(err)
-	}
 
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &FirstRequiredWorker{})
@@ -92,10 +86,6 @@ func Example_requireManyInserted() {
 	if err != nil {
 		panic(err)
 	}
-
-	// Required for purposes of our example here, but in reality t will be the
-	// *testing.T that comes from a test's argument.
-	t := &testing.T{}
 
 	jobs := rivertest.RequireManyInsertedTx[*riverpgxv5.Driver](ctx, t, tx, []rivertest.ExpectedJob{
 		{Args: &FirstRequiredArgs{}},
