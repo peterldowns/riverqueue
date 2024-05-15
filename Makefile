@@ -18,12 +18,12 @@ lint:
 
 .PHONY: test
 test:
-	cd . && go test ./... -p 1
-	cd cmd/river && go test ./...
-	cd riverdriver && go test ./...
-	cd riverdriver/riverdatabasesql && go test ./...
-	cd riverdriver/riverpgxv5 && go test ./...
-	cd rivertype && go test ./...
+	cd . && go test ./... -p 1 -count=1 -race
+	cd cmd/river && go test ./... -count=1 -race
+	cd riverdriver && go test ./... -count=1 -race
+	cd riverdriver/riverdatabasesql && go test ./... -count=1 -race
+	cd riverdriver/riverpgxv5 && go test ./... -count=1 -race
+	cd rivertype && go test ./... -count=1 -race
 
 .PHONY: verify
 verify:
